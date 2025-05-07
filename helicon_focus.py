@@ -43,8 +43,12 @@ def process_stack(
     # Create input.txt with list of source files
     input_file = stack_dir / "input.txt"
     try:
-        # Create input.txt with absolute paths for ORF and DNG files
-        cmd = f"cd {stack_dir.absolute()} && (ls *.ORF *.DNG 2>/dev/null || true) | sed 's|^|{stack_dir.absolute()}/|' > {input_file.absolute()}"
+        # Create input.txt with absolute paths for all supported formats
+        raw_formats = "*.ORF *.orf *.NEF *.nef *.CR2 *.cr2 *.ARW *.arw *.RW2 *.rw2 *.RAF *.raf *.DNG *.dng"
+        standard_formats = "*.JPG *.jpg *.JPEG *.jpeg *.TIFF *.tiff *.TIF *.tif *.PNG *.png"
+        
+        # Build command to find all supported image files
+        cmd = f"cd {stack_dir.absolute()} && (ls {raw_formats} {standard_formats} 2>/dev/null || true) | sed 's|^|{stack_dir.absolute()}/|' > {input_file.absolute()}"
         subprocess.run(
             cmd,
             shell=True,
