@@ -7,29 +7,36 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-def get_capture_time(filepath):
+def get_capture_times(filepaths):
+    """Get capture times for multiple files in one exiftool call."""
     try:
-        # Use exiftool to read EXIF data
-        cmd = ['exiftool', '-DateTimeOriginal', '-d', '%Y:%m:%d %H:%M:%S', str(filepath)]
+        # Use exiftool to read EXIF data for all files at once
+        cmd = ['exiftool', '-DateTimeOriginal', '-d', '%Y:%m:%d %H:%M:%S', '-json'] + [str(f) for f in filepaths]
         result = subprocess.run(cmd, capture_output=True, text=True)
         
         if result.returncode != 0:
-            print(f"Error running exiftool for {filepath}: {result.stderr}")
-            return None
+            print(f"Error running exiftool: {result.stderr}")
+            return {}
             
-        # Extract date from output
-        output = result.stdout.strip()
-        if not output:
-            print(f"No EXIF data found in: {filepath}")
-            return None
-            
-        # Output format: "Date/Time Original: YYYY:MM:DD HH:MM:SS"
-        date_str = output.split(': ', 1)[1]
-        return datetime.strptime(date_str, "%Y:%m:%d %H:%M:%S")
+        # Parse JSON output
+        import json
+        data = json.loads(result.stdout)
+        
+        # Create dictionary of filepath -> capture time
+        times = {}
+        for item in data:
+            filepath = Path(item['SourceFile'])
+            if 'DateTimeOriginal' in item:
+                try:
+                    times[filepath] = datetime.strptime(item['DateTimeOriginal'], "%Y:%m:%d %H:%M:%S")
+                except Exception as e:
+                    print(f"Error parsing date for {filepath}: {e}")
+        
+        return times
         
     except Exception as e:
-        print(f"Error reading EXIF data from {filepath}: {e}")
-        return None
+        print(f"Error reading EXIF data: {e}")
+        return {}
 
 def move_file_with_sidecar(file_path, target_dir):
     """Moves a file and its associated .xmp file, if present."""
@@ -92,8 +99,12 @@ def stack_images(source_dir, target_dir=None, stack_interval=1) -> List[Path]:
     print(f"✅ {total_images} image files found.")
     print("📅 Reading EXIF data...")
     
+    # Get capture times for all files at once
+    print("📅 Reading EXIF data in batch mode...")
+    capture_times = get_capture_times(image_files)
+    
     # Filter files with EXIF data
-    image_files = [f for f in image_files if get_capture_time(f) is not None]
+    image_files = [f for f in image_files if f in capture_times]
     if len(image_files) < total_images:
         print(f"⚠️ {total_images - len(image_files)} files without EXIF data found and skipped.")
     
@@ -111,9 +122,7 @@ def stack_images(source_dir, target_dir=None, stack_interval=1) -> List[Path]:
     stack_sizes = []
 
     for i, file in enumerate(image_files, 1):
-        capture_time = get_capture_time(file)
-        if not capture_time:
-            continue
+        capture_time = capture_times[file]
         
         if i % 10 == 0:  # Show progress every 10 files
             print(f"\r💾 Processing file {i}/{len(image_files)}...", end="")
