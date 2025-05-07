@@ -1,4 +1,4 @@
-# Focus Stack Sorter 📸
+# Focus Stack Organizer 📸
 
 A Python script for automatically organizing focus-stacking image series. Perfect for macro and product photography with cameras like the Olympus OM-1 that support focus bracketing.
 
