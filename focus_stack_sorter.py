@@ -96,7 +96,7 @@ def stack_images(source_dir, target_dir=None, stack_interval=1) -> List[Path]:
         elif ext in all_extensions:
             format_counts[ext] = format_counts.get(ext, 0) + 1
     
-    print("\n📊 Files found:")
+    print("\n📊 Images found:")
     
     # Gruppiere Dateien nach Kategorien
     found_categories = {}
@@ -111,7 +111,6 @@ def stack_images(source_dir, target_dir=None, stack_interval=1) -> List[Path]:
     
     # Zeige gefundene Bilddateien an
     if found_categories:
-        print("\nImage files:")
         for category, files in found_categories.items():
             print(f"\n{category} formats:")
             for line in files:
@@ -124,7 +123,6 @@ def stack_images(source_dir, target_dir=None, stack_interval=1) -> List[Path]:
     
     if total_images > 0:
         print(f"\n✅ Total: {total_images} image files")
-    print("📅 Reading EXIF data...")
     
     # Get capture times for all files at once
     print("📅 Reading EXIF data in batch mode...")
@@ -139,8 +137,6 @@ def stack_images(source_dir, target_dir=None, stack_interval=1) -> List[Path]:
         print("❌ No usable files found!")
         return
 
-    print(f"🔄 Analyzing time intervals between {len(image_files)} images...")
-    
     last_time = None
     stack = []
     stack_num = 1
