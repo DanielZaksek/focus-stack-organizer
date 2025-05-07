@@ -86,17 +86,44 @@ def stack_images(source_dir, target_dir=None, stack_interval=1) -> List[Path]:
             print(f"{category}: {', '.join(extensions)}")
         return
     
-    # Count files per format
+    # Count files per format and find XMP files
     format_counts = {}
-    for f in image_files:
+    xmp_files = []
+    for f in files:
         ext = f.suffix.lower()
-        format_counts[ext] = format_counts.get(ext, 0) + 1
+        if ext == '.xmp':
+            xmp_files.append(f)
+        elif ext in all_extensions:
+            format_counts[ext] = format_counts.get(ext, 0) + 1
     
-    print(f"✅ {total_images} image files found:")
-    for ext, count in format_counts.items():
-        print(f"  - {count}x {ext}")
+    print("\n📊 Files found:")
     
-    print(f"✅ {total_images} image files found.")
+    # Gruppiere Dateien nach Kategorien
+    found_categories = {}
+    for category, extensions in supported_formats.items():
+        category_files = []
+        for ext in extensions:
+            count = format_counts.get(ext.lower(), 0)
+            if count > 0:
+                category_files.append(f"  - {count}x {ext}")
+        if category_files:
+            found_categories[category] = category_files
+    
+    # Zeige gefundene Bilddateien an
+    if found_categories:
+        print("\nImage files:")
+        for category, files in found_categories.items():
+            print(f"\n{category} formats:")
+            for line in files:
+                print(line)
+    
+    # Zeige XMP-Dateien an, falls vorhanden
+    if xmp_files:
+        print(f"\nSidecar files:")
+        print(f"  - {len(xmp_files)}x .xmp")
+    
+    if total_images > 0:
+        print(f"\n✅ Total: {total_images} image files")
     print("📅 Reading EXIF data...")
     
     # Get capture times for all files at once
@@ -151,16 +178,19 @@ def stack_images(source_dir, target_dir=None, stack_interval=1) -> List[Path]:
             move_file_with_sidecar(file, stack_dir)
             files_moved += 1
         created_stacks.append(stack_dir)
-        stack_sizes.append((stack_num, len(stack)))
+        stack_sizes.append(len(stack))
         stacks_created += 1
 
     print("\r" + " " * 50 + "\r", end="")  # Clear the last progress indicator
     print(f"✅ Done: {stacks_created} stacks created.")
-    
-    if stacks_created > 0:
+    # Print stack overview
+    if stack_sizes:
         print("\n📂 Stack overview:")
-        for num, size in stack_sizes:
-            print(f"Stack_{num:03} → {size} images")
+        for i, size in enumerate(stack_sizes, 1):
+            stack_dir = target_path / f"Stack_{i:03d}"
+            xmp_count = len(list(stack_dir.glob("*.xmp")))
+            xmp_info = f" (+{xmp_count} xmp)" if xmp_count > 0 else ""
+            print(f"Stack_{i:03d} → {size[1] if isinstance(size, tuple) else size} images{xmp_info}")
         print(f"\n📁 {files_moved} files moved.")
         print(f"📁 Target directory: {target_path.resolve()}")
     else:
