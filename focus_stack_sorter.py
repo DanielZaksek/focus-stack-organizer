@@ -4,6 +4,7 @@ import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from typing import List, Optional
 
 def get_capture_time(filepath):
     try:
@@ -39,9 +40,16 @@ def move_file_with_sidecar(file_path, target_dir):
     if xmp_path.exists():
         shutil.move(str(xmp_path), target_dir)
 
-def stack_images(source_dir, target_dir=None, stack_interval=1):
+def run_helicon_focus(stack_dir: Path, output_dir: Path, use_tiff: bool = False) -> None:
+    """Process a stack with Helicon Focus using methods A, B, C and combine A+B."""
+    from helicon_focus import process_stack
+    process_stack(stack_dir, output_dir)
+
+def stack_images(source_dir, target_dir=None, stack_interval=1) -> List[Path]:
     print(f"\n🔍 Analyzing directory: {source_dir}")
     source_path = Path(source_dir)
+    created_stacks = []  # List of created stack directories
+    stack_count = 0  # Initialize stack counter
     if target_dir:
         target_path = Path(target_dir)
     else:
@@ -106,8 +114,8 @@ def stack_images(source_dir, target_dir=None, stack_interval=1):
         if not capture_time:
             continue
         
-        if i % 10 == 0:  # Zeige Fortschritt alle 10 Dateien
-            print(f"\r💾 Verarbeite Datei {i}/{len(image_files)}...", end="")
+        if i % 10 == 0:  # Show progress every 10 files
+            print(f"\r💾 Processing file {i}/{len(image_files)}...", end="")
 
         if last_time and (capture_time - last_time).total_seconds() > stack_interval:
             if len(stack) > 1:
@@ -124,13 +132,15 @@ def stack_images(source_dir, target_dir=None, stack_interval=1):
         stack.append(file)
         last_time = capture_time
 
-    # Letzten Stack verarbeiten
+    # Process last stack
     if len(stack) > 1:
         stack_dir = target_path / f"Stack_{stack_num:03}"
         stack_dir.mkdir(parents=True, exist_ok=True)
-        for f in stack:
-            move_file_with_sidecar(f, stack_dir)
+        for file in stack:
+            move_file_with_sidecar(file, stack_dir)
             files_moved += 1
+        stack_count += 1
+        created_stacks.append(stack_dir)
         stack_sizes.append((stack_num, len(stack)))
         stacks_created += 1
 
@@ -148,13 +158,18 @@ def stack_images(source_dir, target_dir=None, stack_interval=1):
         print("  - Images were not taken in rapid succession")
         print("  - Time interval between shots > 1 second")
         print("  - Only single images in directory")
+    
+    return created_stacks
 
 def print_usage():
-    print("❗ Usage: python focus_stack_sorter.py <source_dir> [target_dir] [--interval <seconds>]")
+    print("❗ Usage: python focus_stack_sorter.py <source_dir> [target_dir] [options]")
     print("\nParameters:")
     print("  <source_dir>     Directory containing the original images (required)")
     print("  [target_dir]    Directory for sorted stacks (optional)")
+    print("\nOptions:")
     print("  --interval      Maximum time interval between images in seconds (optional, default: 1)")
+    print("  --stack         Process stacks with HeliconFocus after organizing")
+    print("  --tiff          Use TIFF format for HeliconFocus processing (default: RAW/DNG)")
     print("\nExamples:")
     print("  python focus_stack_sorter.py ~/Pictures/OM1_RAWs")
     print("  python focus_stack_sorter.py ~/Pictures/OM1_RAWs ~/Stacks")
@@ -168,9 +183,11 @@ if __name__ == "__main__":
 
     source_dir = sys.argv[1]
     target_dir = None
-    interval = 1.0  # Standardwert: 1 Sekunde
+    interval = 1.0  # Default: 1 second
+    use_helicon = False
+    use_tiff = False
 
-    # Verarbeite die restlichen Argumente
+    # Process remaining arguments
     i = 2
     while i < len(sys.argv):
         if sys.argv[i] == "--interval":
@@ -186,6 +203,12 @@ if __name__ == "__main__":
             except ValueError:
                 print(f"❌ Error: Invalid interval '{sys.argv[i + 1]}'")
                 sys.exit(1)
+        elif sys.argv[i] == "--stack":
+            use_helicon = True
+            i += 1
+        elif sys.argv[i] == "--tiff":
+            use_tiff = True
+            i += 1
         else:
             if target_dir is None:
                 target_dir = sys.argv[i]
@@ -195,4 +218,18 @@ if __name__ == "__main__":
                 sys.exit(1)
             i += 1
 
-    stack_images(source_dir, target_dir, interval)
+    # Create target directory if not specified
+    if not target_dir:
+        target_dir = source_dir
+    
+    # Run stacking
+    stacks = stack_images(source_dir, target_dir, interval)
+    
+    # Process with HeliconFocus if requested
+    if use_helicon:
+        print("\n🎨 Processing stacks with HeliconFocus...")
+        # Create 'stacked' directory in stack directory
+        for stack_dir in stacks:
+            output_dir = stack_dir / "stacked"
+            print(f"\n📂 Output directory: {output_dir}")
+            run_helicon_focus(stack_dir, output_dir, use_tiff)

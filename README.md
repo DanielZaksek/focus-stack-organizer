@@ -13,6 +13,11 @@ A Python script for automatically organizing focus-stacking image series. Perfec
 - Leaves single images untouched
 - Detailed progress display and stack overview
 - Optional target directory for sorted stacks
+- Automatic focus stacking with HeliconFocus:
+  - Processes each stack with methods A, B, and C
+  - Creates an additional AB combination
+  - Supports both RAW/DNG and TIFF formats
+  - Saves results in a separate 'stacked' directory
 
 ## ⚙️ System Requirements
 
@@ -25,6 +30,8 @@ A Python script for automatically organizing focus-stacking image series. Perfec
 
 - Python 3.6 or higher
 - exiftool (for reading EXIF data)
+- HeliconFocus 8 or higher (for automatic stacking)
+  - Must be installed in `/Applications/HeliconFocus.app` on macOS
 
 ## 📥 Installation
 
@@ -71,7 +78,12 @@ python3 focus_stack_sorter.py <source_dir> [target_dir]
 
 - `<source_dir>`: Required - Directory containing the original images
 - `[target_dir]`: Optional - Directory for sorted stacks
+
+### Options
+
 - `--interval <seconds>`: Optional - Maximum time interval between images in seconds (default: 1)
+- `--stack`: Optional - Process stacks with HeliconFocus after organizing
+- `--tiff`: Optional - Use TIFF format for HeliconFocus processing (default: RAW/DNG)
 
 ### Examples
 
@@ -99,6 +111,18 @@ python3 focus_stack_sorter.py <source_dir> [target_dir]
    python3 focus_stack_sorter.py ~/Pictures/OM1_RAWs ~/Stacks --interval 0.5
    ```
 
+5. **Automatic stacking with HeliconFocus (RAW/DNG)**
+
+   ```bash
+   python3 focus_stack_sorter.py ~/Pictures/OM1_RAWs --stack
+   ```
+
+6. **Automatic stacking with HeliconFocus (TIFF)**
+
+   ```bash
+   python3 focus_stack_sorter.py ~/Pictures/OM1_RAWs --stack --tiff
+   ```
+
 ### Example Output
 
 ```bash
@@ -119,6 +143,17 @@ Stack_003 → 8 images
 
 📁 144 files moved.
 📁 Target directory: ~/Stacks
+
+🎨 Processing stacks with HeliconFocus...
+📦 Processing Stack_001 with Method A...
+✅ Method A completed successfully
+📦 Processing Stack_001 with Method B...
+✅ Method B completed successfully
+📦 Processing Stack_001 with Method C...
+✅ Method C completed successfully
+📦 Combining methods A and B...
+✅ A+B combination completed successfully
+...
 ```
 
 ## 📝 How It Works
@@ -137,11 +172,16 @@ Stack_003 → 8 images
 - Supports various RAW and standard image formats
 - Associated `.xmp` files are automatically moved
 - Make sure you have write permissions in the directories
+- HeliconFocus must be installed in the default location for stacking
+- Stacked results are saved in a 'stacked' subdirectory
+- Each stack is processed with methods A, B, C, and A+B combination
+- HeliconFocus runs in silent mode (no GUI)
 
 ## 🛠 Planned Features
 
 - [x] Support for additional RAW formats and standard image formats
 - [x] Configurable time interval for stack detection
+- [x] Automatic stacking with HeliconFocus (methods A, B, C and A+B)
 - [ ] Graphical User Interface (GUI)
 - [ ] Drag & Drop functionality
 - [ ] Stack content preview
