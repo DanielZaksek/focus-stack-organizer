@@ -1,0 +1,198 @@
+import os
+import sys
+import shutil
+import subprocess
+from datetime import datetime
+from pathlib import Path
+
+def get_capture_time(filepath):
+    try:
+        # Use exiftool to read EXIF data
+        cmd = ['exiftool', '-DateTimeOriginal', '-d', '%Y:%m:%d %H:%M:%S', str(filepath)]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            print(f"Error running exiftool for {filepath}: {result.stderr}")
+            return None
+            
+        # Extract date from output
+        output = result.stdout.strip()
+        if not output:
+            print(f"No EXIF data found in: {filepath}")
+            return None
+            
+        # Output format: "Date/Time Original: YYYY:MM:DD HH:MM:SS"
+        date_str = output.split(': ', 1)[1]
+        return datetime.strptime(date_str, "%Y:%m:%d %H:%M:%S")
+        
+    except Exception as e:
+        print(f"Error reading EXIF data from {filepath}: {e}")
+        return None
+
+def move_file_with_sidecar(file_path, target_dir):
+    """Moves a file and its associated .xmp file, if present."""
+    # Move original file
+    shutil.move(str(file_path), target_dir)
+    
+    # Check for associated .xmp file
+    xmp_path = file_path.with_suffix('.xmp')
+    if xmp_path.exists():
+        shutil.move(str(xmp_path), target_dir)
+
+def stack_images(source_dir, target_dir=None, stack_interval=1):
+    print(f"\n🔍 Analyzing directory: {source_dir}")
+    source_path = Path(source_dir)
+    if target_dir:
+        target_path = Path(target_dir)
+    else:
+        target_path = source_path
+
+    print("💾 Searching for image files...")
+    files = sorted(source_path.glob("*.*"))
+    
+    # Supported image formats
+    supported_formats = {
+        'RAW': [".orf", ".nef", ".cr2", ".arw", ".rw2", ".raf", ".dng"],  # Olympus, Nikon, Canon, Sony, Panasonic, Fuji, Adobe
+        'Standard': [".jpg", ".jpeg", ".tiff", ".tif", ".png"],
+    }
+    
+    # Create flat list of all extensions
+    all_extensions = [ext.lower() for exts in supported_formats.values() for ext in exts]
+    
+    # Find all image files
+    image_files = [f for f in files if f.suffix.lower() in all_extensions]
+    total_images = len(image_files)
+    
+    if total_images == 0:
+        print("⚠️ No supported image files found!")
+        print("\nSupported formats:")
+        for category, extensions in supported_formats.items():
+            print(f"{category}: {', '.join(extensions)}")
+        return
+    
+    # Count files per format
+    format_counts = {}
+    for f in image_files:
+        ext = f.suffix.lower()
+        format_counts[ext] = format_counts.get(ext, 0) + 1
+    
+    print(f"✅ {total_images} image files found:")
+    for ext, count in format_counts.items():
+        print(f"  - {count}x {ext}")
+    
+    print(f"✅ {total_images} image files found.")
+    print("📅 Reading EXIF data...")
+    
+    # Filter files with EXIF data
+    image_files = [f for f in image_files if get_capture_time(f) is not None]
+    if len(image_files) < total_images:
+        print(f"⚠️ {total_images - len(image_files)} files without EXIF data found and skipped.")
+    
+    if not image_files:
+        print("❌ No usable files found!")
+        return
+
+    print(f"🔄 Analyzing time intervals between {len(image_files)} images...")
+    
+    last_time = None
+    stack = []
+    stack_num = 1
+    stacks_created = 0
+    files_moved = 0
+    stack_sizes = []
+
+    for i, file in enumerate(image_files, 1):
+        capture_time = get_capture_time(file)
+        if not capture_time:
+            continue
+        
+        if i % 10 == 0:  # Zeige Fortschritt alle 10 Dateien
+            print(f"\r💾 Verarbeite Datei {i}/{len(image_files)}...", end="")
+
+        if last_time and (capture_time - last_time).total_seconds() > stack_interval:
+            if len(stack) > 1:
+                stack_dir = target_path / f"Stack_{stack_num:03}"
+                stack_dir.mkdir(parents=True, exist_ok=True)
+                for f in stack:
+                    move_file_with_sidecar(f, stack_dir)
+                    files_moved += 1
+                stack_sizes.append((stack_num, len(stack)))
+                stacks_created += 1
+                stack_num += 1
+            stack = []
+
+        stack.append(file)
+        last_time = capture_time
+
+    # Letzten Stack verarbeiten
+    if len(stack) > 1:
+        stack_dir = target_path / f"Stack_{stack_num:03}"
+        stack_dir.mkdir(parents=True, exist_ok=True)
+        for f in stack:
+            move_file_with_sidecar(f, stack_dir)
+            files_moved += 1
+        stack_sizes.append((stack_num, len(stack)))
+        stacks_created += 1
+
+    print("\r" + " " * 50 + "\r", end="")  # Clear the last progress indicator
+    print(f"✅ Done: {stacks_created} stacks created.")
+    
+    if stacks_created > 0:
+        print("\n📂 Stack overview:")
+        for num, size in stack_sizes:
+            print(f"Stack_{num:03} → {size} images")
+        print(f"\n📁 {files_moved} files moved.")
+        print(f"📁 Target directory: {target_path.resolve()}")
+    else:
+        print("ℹ️ No focus stacks found. Possible reasons:")
+        print("  - Images were not taken in rapid succession")
+        print("  - Time interval between shots > 1 second")
+        print("  - Only single images in directory")
+
+def print_usage():
+    print("❗ Usage: python focus_stack_sorter.py <source_dir> [target_dir] [--interval <seconds>]")
+    print("\nParameters:")
+    print("  <source_dir>     Directory containing the original images (required)")
+    print("  [target_dir]    Directory for sorted stacks (optional)")
+    print("  --interval      Maximum time interval between images in seconds (optional, default: 1)")
+    print("\nExamples:")
+    print("  python focus_stack_sorter.py ~/Pictures/OM1_RAWs")
+    print("  python focus_stack_sorter.py ~/Pictures/OM1_RAWs ~/Stacks")
+    print("  python focus_stack_sorter.py ~/Pictures/OM1_RAWs --interval 2")
+    print("  python focus_stack_sorter.py ~/Pictures/OM1_RAWs ~/Stacks --interval 0.5")
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2 or sys.argv[1] in ["-h", "--help"]:
+        print_usage()
+        sys.exit(1)
+
+    source_dir = sys.argv[1]
+    target_dir = None
+    interval = 1.0  # Standardwert: 1 Sekunde
+
+    # Verarbeite die restlichen Argumente
+    i = 2
+    while i < len(sys.argv):
+        if sys.argv[i] == "--interval":
+            if i + 1 >= len(sys.argv):
+                print("❌ Error: --interval requires a value in seconds")
+                sys.exit(1)
+            try:
+                interval = float(sys.argv[i + 1])
+                if interval <= 0:
+                    print("❌ Error: Interval must be greater than 0")
+                    sys.exit(1)
+                i += 2
+            except ValueError:
+                print(f"❌ Error: Invalid interval '{sys.argv[i + 1]}'")
+                sys.exit(1)
+        else:
+            if target_dir is None:
+                target_dir = sys.argv[i]
+            else:
+                print(f"❌ Error: Unknown parameter '{sys.argv[i]}'")
+                print_usage()
+                sys.exit(1)
+            i += 1
+
+    stack_images(source_dir, target_dir, interval)
