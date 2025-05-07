@@ -2,6 +2,7 @@
 HeliconFocus integration module for focus stacking.
 """
 from pathlib import Path
+import time
 import subprocess
 from typing import List
 
@@ -19,7 +20,8 @@ def process_stack(
     smoothing: int = SMOOTHING,
     jpeg_quality: int = JPEG_QUALITY,
     output_format: str = OUTPUT_FORMAT,
-    helicon_path: str = HELICON_PATH
+    helicon_path: str = HELICON_PATH,
+    combine_ab: bool = True
 ) -> List[Path]:
     """Process a stack with Helicon Focus using methods A, B, C.
     
@@ -31,6 +33,7 @@ def process_stack(
         jpeg_quality: JPEG quality 1-100 (default: {JPEG_QUALITY})
         output_format: Output format 'jpg', 'tif' or 'dng' (default: {OUTPUT_FORMAT})
         helicon_path: Path to HeliconFocus executable (default: {HELICON_PATH})
+        combine_ab: Whether to create A+B combination (default: True)
     
     Returns:
         List of generated files
@@ -58,20 +61,36 @@ def process_stack(
         print(f"❌ Failed to create input file: {e}")
         return []
     
-    # Process with different methods
+    # Check which methods already exist
     methods = {'A': 0, 'B': 1, 'C': 2}  # Method mapping (A=0, B=1, C=2)
+    existing_methods = []
+    missing_methods = []
     results = []
     
-    for method_name, method_value in methods.items():
+    # Check which output files already exist
+    for method_name in methods:
+        output_file = output_dir / f"{stack_dir.name}_{method_name}.{output_format}"
+        if output_file.exists():
+            existing_methods.append(method_name)
+            results.append(output_file)
+        else:
+            missing_methods.append(method_name)
+    
+    if existing_methods:
+        print(f"\n💡 Found existing results for methods: {', '.join(existing_methods)}")
+        print(f"🔄 Will generate missing methods: {', '.join(missing_methods)}")
+    
+    # Process missing methods
+    for method_name in missing_methods:
         output_file = output_dir / f"{stack_dir.name}_{method_name}.{output_format}"
         
         # Create command line for HeliconFocus
         cmd = [
-            HELICON_PATH,
+            helicon_path,
             '-silent',
             '-i', str(input_file),
             f'-save:{output_file}',
-            f'-mp:{method_value}',  # Method parameter (A=0, B=1, C=2)
+            f'-mp:{methods[method_name]}',  # Method parameter (A=0, B=1, C=2)
             f'-rp:{radius}',         # Radius parameter
             f'-sp:{smoothing}'       # Smoothing parameter
         ]
@@ -81,22 +100,31 @@ def process_stack(
             cmd.append(f'-j:{jpeg_quality}')
         
         print(f"\n📦 Processing {stack_dir.name} with Method {method_name}...")
+        start_time = time.time()
         try:
             result = subprocess.run(cmd, capture_output=True, text=True)
             if result.returncode == 0:
                 results.append(output_file)
-                print(f"✅ Method {method_name} completed successfully")
+                elapsed = time.time() - start_time
+                print(f"✅ Method {method_name} completed successfully in {elapsed:.2f} seconds")
             else:
-                print(f"❌ Error with Method {method}: {result.stderr}")
+                print(f"❌ Error with Method {method_name}: {result.stderr}")
         except Exception as e:
             print(f"❌ Failed to run HeliconFocus: {e}")
     
-    # Combine A and B using method B
-    if len(results) >= 2:
-        a_file = output_dir / f"{stack_dir.name}_A.{output_format}"
-        b_file = output_dir / f"{stack_dir.name}_B.{output_format}"
+    # Only process A+B combination if requested
+    if combine_ab:
+        # Check if A+B combination already exists
+        ab_file = output_dir / f"{stack_dir.name}_AB.{output_format}"
+        if ab_file.exists():
+            print("\n💡 A+B combination already exists")
+            results.append(ab_file)
+            return results
         
-        if a_file.exists() and b_file.exists():
+        # Combine A and B using method B if both exist
+        if 'A' in existing_methods + missing_methods and 'B' in existing_methods + missing_methods:
+            a_file = output_dir / f"{stack_dir.name}_A.{output_format}"
+            b_file = output_dir / f"{stack_dir.name}_B.{output_format}"
             # Create new input.txt for A+B combination
             ab_input = stack_dir / "input_ab.txt"
             with open(ab_input, 'w') as f:
@@ -119,12 +147,14 @@ def process_stack(
             if OUTPUT_FORMAT.lower() == 'jpg':
                 cmd.append(f'-j:{JPEG_QUALITY}')
             
-            print("\n📦 Combining methods A and B...")
+            print("\n💶 Combining methods A and B...")
+            start_time = time.time()
             try:
                 result = subprocess.run(cmd, capture_output=True, text=True)
                 if result.returncode == 0:
                     results.append(ab_file)
-                    print("✅ A+B combination completed successfully")
+                    elapsed = time.time() - start_time
+                    print(f"✅ A+B combination completed successfully in {elapsed:.2f} seconds")
                 else:
                     print(f"❌ Error combining A+B: {result.stderr}")
             except Exception as e:

@@ -2,6 +2,7 @@ import os
 import sys
 import shutil
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -40,10 +41,10 @@ def move_file_with_sidecar(file_path, target_dir):
     if xmp_path.exists():
         shutil.move(str(xmp_path), target_dir)
 
-def run_helicon_focus(stack_dir: Path, output_dir: Path, use_tiff: bool = False) -> None:
-    """Process a stack with Helicon Focus using methods A, B, C and combine A+B."""
+def run_helicon_focus(stack_dir: Path, output_dir: Path, use_tiff: bool = False, combine_ab: bool = True) -> None:
+    """Process a stack with Helicon Focus using methods A, B, C and optionally combine A+B."""
     from helicon_focus import process_stack
-    process_stack(stack_dir, output_dir)
+    process_stack(stack_dir, output_dir, combine_ab=combine_ab)
 
 def stack_images(source_dir, target_dir=None, stack_interval=1) -> List[Path]:
     print(f"\n🔍 Analyzing directory: {source_dir}")
@@ -124,6 +125,7 @@ def stack_images(source_dir, target_dir=None, stack_interval=1) -> List[Path]:
                 for f in stack:
                     move_file_with_sidecar(f, stack_dir)
                     files_moved += 1
+                created_stacks.append(stack_dir)
                 stack_sizes.append((stack_num, len(stack)))
                 stacks_created += 1
                 stack_num += 1
@@ -139,7 +141,6 @@ def stack_images(source_dir, target_dir=None, stack_interval=1) -> List[Path]:
         for file in stack:
             move_file_with_sidecar(file, stack_dir)
             files_moved += 1
-        stack_count += 1
         created_stacks.append(stack_dir)
         stack_sizes.append((stack_num, len(stack)))
         stacks_created += 1
@@ -162,14 +163,14 @@ def stack_images(source_dir, target_dir=None, stack_interval=1) -> List[Path]:
     return created_stacks
 
 def print_usage():
-    print("❗ Usage: python focus_stack_sorter.py <source_dir> [target_dir] [options]")
-    print("\nParameters:")
-    print("  <source_dir>     Directory containing the original images (required)")
-    print("  [target_dir]    Directory for sorted stacks (optional)")
+    print("❗ Usage: python focus_stack_sorter.py <source_dir> [<target_dir>] [options]")
     print("\nOptions:")
     print("  --interval      Maximum time interval between images in seconds (optional, default: 1)")
     print("  --stack         Process stacks with HeliconFocus after organizing")
+    print("  --stack-only    Process existing stacks with HeliconFocus without sorting")
+    print("  --resume        Process only unprocessed stacks with HeliconFocus")
     print("  --tiff          Use TIFF format for HeliconFocus processing (default: RAW/DNG)")
+    print("  --no-ab         Skip A+B combination in HeliconFocus processing")
     print("\nExamples:")
     print("  python focus_stack_sorter.py ~/Pictures/OM1_RAWs")
     print("  python focus_stack_sorter.py ~/Pictures/OM1_RAWs ~/Stacks")
@@ -185,7 +186,10 @@ if __name__ == "__main__":
     target_dir = None
     interval = 1.0  # Default: 1 second
     use_helicon = False
+    stack_only = False
+    resume = False
     use_tiff = False
+    combine_ab = True  # Default: create A+B combination
 
     # Process remaining arguments
     i = 2
@@ -209,6 +213,17 @@ if __name__ == "__main__":
         elif sys.argv[i] == "--tiff":
             use_tiff = True
             i += 1
+        elif sys.argv[i] == "--no-ab":
+            combine_ab = False
+            i += 1
+        elif sys.argv[i] == "--stack-only":
+            stack_only = True
+            use_helicon = True
+            i += 1
+        elif sys.argv[i] == "--resume":
+            resume = True
+            use_helicon = True
+            i += 1
         else:
             if target_dir is None:
                 target_dir = sys.argv[i]
@@ -222,14 +237,45 @@ if __name__ == "__main__":
     if not target_dir:
         target_dir = source_dir
     
-    # Run stacking
-    stacks = stack_images(source_dir, target_dir, interval)
+    # Start total time measurement
+    total_start = time.time()
+    
+    # Find existing stacks if not sorting
+    if stack_only:
+        print("\n🔍 Looking for existing stacks...")
+        stacks = []
+        for item in Path(target_dir).iterdir():
+            if item.is_dir() and item.name.startswith("Stack_"):
+                stacks.append(item)
+        print(f"Found {len(stacks)} existing stacks")
+    else:
+        # Run stacking
+        sort_start = time.time()
+        stacks = stack_images(source_dir, target_dir, interval)
+        sort_time = time.time() - sort_start
+        print(f"\n⏱️ Sorting time: {sort_time:.2f} seconds")
     
     # Process with HeliconFocus if requested
     if use_helicon:
+        # Filter stacks if resuming
+        if resume:
+            unprocessed_stacks = []
+            for stack in stacks:
+                if not (stack / "stacked").exists():
+                    unprocessed_stacks.append(stack)
+            print(f"\n🔍 Found {len(unprocessed_stacks)} unprocessed stacks")
+            stacks = unprocessed_stacks
+        stack_start = time.time()
         print("\n🎨 Processing stacks with HeliconFocus...")
         # Create 'stacked' directory in stack directory
         for stack_dir in stacks:
             output_dir = stack_dir / "stacked"
             print(f"\n📂 Output directory: {output_dir}")
-            run_helicon_focus(stack_dir, output_dir, use_tiff)
+            run_helicon_focus(stack_dir, output_dir, use_tiff, combine_ab)
+        
+        stack_time = time.time() - stack_start
+        print(f"\n⏱️ Total stacking time: {stack_time:.2f} seconds")
+    
+    # Print total execution time
+    total_time = time.time() - total_start
+    print(f"\n⏱️ Total execution time: {total_time:.2f} seconds")

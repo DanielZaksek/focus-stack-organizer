@@ -71,7 +71,7 @@ A Python script for automatically organizing focus-stacking image series. Perfec
 ### Basic Syntax
 
 ```bash
-python3 focus_stack_sorter.py <source_dir> [target_dir]
+python3 focus_stack_sorter.py <source_dir> [target_dir] [options]
 ```
 
 ### Parameters
@@ -83,45 +83,47 @@ python3 focus_stack_sorter.py <source_dir> [target_dir]
 
 - `--interval <seconds>`: Optional - Maximum time interval between images in seconds (default: 1)
 - `--stack`: Optional - Process stacks with HeliconFocus after organizing
+- `--stack-only`: Optional - Process existing stacks with HeliconFocus without sorting
+- `--resume`: Optional - Process only unprocessed stacks with HeliconFocus
 - `--tiff`: Optional - Use TIFF format for HeliconFocus processing (default: RAW/DNG)
+- `--no-ab`: Optional - Skip A+B combination in HeliconFocus processing
 
 ### Examples
 
-1. **Create stacks in source directory**
+Here are some common usage examples:
 
-   ```bash
-   python3 focus_stack_sorter.py ~/Pictures/OM1_RAWs
-   ```
+#### Basic Usage
 
-2. **Create stacks in separate target directory**
+```bash
+# Sort images in current directory
+python3 focus_stack_sorter.py .
 
-   ```bash
-   python3 focus_stack_sorter.py ~/Pictures/OM1_RAWs ~/Stacks
-   ```
+# Sort images from source to target directory
+python3 focus_stack_sorter.py ~/Pictures/OM1_RAWs ~/Stacks
+```
 
-3. **Adjust time interval (2 seconds)**
+#### Advanced Usage
 
-   ```bash
-   python3 focus_stack_sorter.py ~/Pictures/OM1_RAWs --interval 2
-   ```
+```bash
+# Sort and stack images with 2 second interval
+python3 focus_stack_sorter.py ~/Pictures/OM1_RAWs --interval 2 --stack
 
-4. **Target directory and time interval (0.5 seconds)**
+# Process existing stacks without sorting
+python3 focus_stack_sorter.py ~/Stacks --stack-only
 
-   ```bash
-   python3 focus_stack_sorter.py ~/Pictures/OM1_RAWs ~/Stacks --interval 0.5
-   ```
+# Resume interrupted stacking (only process unprocessed stacks)
+python3 focus_stack_sorter.py ~/Stacks --resume
+```
 
-5. **Automatic stacking with HeliconFocus (RAW/DNG)**
+#### Combined Options
 
-   ```bash
-   python3 focus_stack_sorter.py ~/Pictures/OM1_RAWs --stack
-   ```
+```bash
+# Process existing unprocessed stacks without sorting
+python3 focus_stack_sorter.py ~/Stacks --stack-only --resume
 
-6. **Automatic stacking with HeliconFocus (TIFF)**
-
-   ```bash
-   python3 focus_stack_sorter.py ~/Pictures/OM1_RAWs --stack --tiff
-   ```
+# Process unprocessed stacks in TIFF format without A+B combination
+python3 focus_stack_sorter.py ~/Stacks --resume --tiff --no-ab
+```
 
 ### Example Output
 
