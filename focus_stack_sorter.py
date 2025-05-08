@@ -3,15 +3,17 @@ import sys
 import shutil
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum, auto
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Tuple
 from common import ImageFormat
 
-
-
+# Konstanten für die Optimierung
+BATCH_SIZE = 100  # Anzahl der Dateien pro Batch für exiftool
+MAX_WORKERS = 4   # Maximale Anzahl paralleler Threads
 
 
 @dataclass
@@ -43,8 +45,37 @@ class SorterConfig:
             raise ValueError("Stack interval must be greater than 0 seconds")
 
 
-def get_capture_times(filepaths, exif_config=None):
-    """Get capture times for multiple files in one exiftool call.
+def process_batch(batch: List[Path], exif_config: dict) -> Dict[Path, datetime]:
+    """Process a batch of files with exiftool."""
+    try:
+        cmd = ['exiftool', f"-{exif_config['exif_tag']}", '-d', exif_config['date_format'], '-json']
+        cmd.extend(str(f) for f in batch)
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            print(f"Error running exiftool for batch: {result.stderr}")
+            return {}
+            
+        import json
+        data = json.loads(result.stdout)
+        
+        times = {}
+        tag_name = exif_config['exif_tag']
+        for item in data:
+            filepath = Path(item['SourceFile'])
+            if tag_name in item:
+                try:
+                    times[filepath] = datetime.strptime(item[tag_name], exif_config['date_format'])
+                except Exception as e:
+                    print(f"Error parsing date for {filepath}: {e}")
+        return times
+        
+    except Exception as e:
+        print(f"Error processing batch: {e}")
+        return {}
+
+def get_capture_times(filepaths: List[Path], exif_config=None) -> Dict[Path, datetime]:
+    """Get capture times for multiple files using parallel batch processing.
     
     Args:
         filepaths: List of files to process
@@ -60,46 +91,57 @@ def get_capture_times(filepaths, exif_config=None):
             'exif_tag': 'DateTimeOriginal'
         })
     
-    try:
-        # Use exiftool to read EXIF data for all files at once
-        cmd = ['exiftool', f"-{exif_config['exif_tag']}", '-d', exif_config['date_format'], '-json']
-        cmd.extend(str(f) for f in filepaths)
-        
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            print(f"Error running exiftool: {result.stderr}")
-            return {}
-            
-        # Parse JSON output
-        import json
-        data = json.loads(result.stdout)
-        
-        # Create dictionary of filepath -> capture time
-        times = {}
-        tag_name = exif_config['exif_tag']
-        for item in data:
-            filepath = Path(item['SourceFile'])
-            if tag_name in item:
-                try:
-                    times[filepath] = datetime.strptime(item[tag_name], exif_config['date_format'])
-                except Exception as e:
-                    print(f"Error parsing date for {filepath}: {e}")
-        
-        return times
-        
-    except Exception as e:
-        print(f"Error reading EXIF data: {e}")
-        return {}
-
-def move_file_with_sidecar(file_path, target_dir):
-    """Moves a file and its associated .xmp file, if present."""
-    # Move original file
-    shutil.move(str(file_path), target_dir)
+    # Teile Dateien in Batches auf
+    batches = [filepaths[i:i + BATCH_SIZE] for i in range(0, len(filepaths), BATCH_SIZE)]
     
-    # Check for associated .xmp file
-    xmp_path = file_path.with_suffix('.xmp')
-    if xmp_path.exists():
-        shutil.move(str(xmp_path), target_dir)
+    # Verarbeite Batches parallel
+    all_times = {}
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        future_to_batch = {executor.submit(process_batch, batch, exif_config): batch 
+                         for batch in batches}
+        
+        for future in future_to_batch:
+            try:
+                times = future.result()
+                all_times.update(times)
+            except Exception as e:
+                print(f"Error processing batch: {e}")
+    
+    return all_times
+
+def move_files_batch(files: List[Tuple[Path, Path]], xmp_check: bool = True) -> int:
+    """Move multiple files and their XMP sidecars in parallel.
+    
+    Args:
+        files: List of (source_path, target_dir) tuples
+        xmp_check: Whether to check and move XMP sidecar files
+    
+    Returns:
+        Number of files moved
+    """
+    moved = 0
+    
+    def move_single(src_target: Tuple[Path, Path]) -> int:
+        try:
+            src, target = src_target
+            shutil.move(str(src), target)
+            count = 1
+            
+            if xmp_check:
+                xmp_path = src.with_suffix('.xmp')
+                if xmp_path.exists():
+                    shutil.move(str(xmp_path), target)
+                    count += 1
+            return count
+        except Exception as e:
+            print(f"Error moving {src}: {e}")
+            return 0
+    
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+        for count in executor.map(move_single, files):
+            moved += count
+    
+    return moved
 
 
 
@@ -116,55 +158,50 @@ def stack_images(source_dir: Path, target_dir: Optional[Path] = None, stack_inte
         stack_interval: Time interval in seconds to group images. Default is 1 second.
         
     Returns:
-        List[Path]: List of created stack directories. Each directory contains the
-        images for one focus stack and will be named 'Stack_XXX' where XXX is a
+        List[Path]: Created stack directories. Each directory contains the image
+        files for one focus stack and will be named 'Stack_XXX' where XXX is a
         sequential number.
     """
     # Load configuration
     from config_manager import ConfigManager
     config = ConfigManager().get_config()
-    focus_config = config.get('sorter', {})
     
-    # Use configuration or defaults
-    stack_interval = stack_interval or focus_config.get('stack_interval', 1.0)
-    min_stack_size = focus_config.get('min_stack_size', 2)
-    stack_name_format = focus_config.get('stack_name_format', 'Stack_{:03d}')
-    progress_update_count = focus_config.get('progress_update_count', 20)
+    # Initialize configuration
+    sorter_config = config.get('sorter', {})
+    min_stack_size = sorter_config.get('min_stack_size', 2)
+    stack_name_format = sorter_config.get('stack_name_format', 'Stack_{:03d}')
+    progress_update_count = sorter_config.get('progress_updates', 20)
     
-    source_path = Path(source_dir)
-    target_path = target_dir if target_dir else source_path
-    created_stacks = []  # List of created stack directories
-    stack_count = 0  # Initialize stack counter
-
-    print(f"\n🔍 Analyzing directory: {source_path}")
-    print("💾 Searching for image files...")
+    if stack_interval is None:
+        stack_interval = sorter_config.get('stack_interval', 1.0)
     
-    # Get all files and supported extensions
-    files = sorted(source_path.glob("*.*"))
-    all_extensions = ImageFormat.all_extensions()
+    # Create target directory if not exists
+    target_path = Path(target_dir) if target_dir else source_dir
+    target_path.mkdir(parents=True, exist_ok=True)
+    
+    # Get all supported image formats
+    all_extensions = set()
+    for extensions in ImageFormat.extensions().values():
+        all_extensions.update(extensions)
     
     # Find all image files
-    image_files = [f for f in files if f.suffix.lower() in all_extensions]
-    total_images = len(image_files)
-    
-    if total_images == 0:
-        print("⚠️ No supported image files found!")
-        print("\nSupported formats:")
-        for category, extensions in ImageFormat.extensions().items():
-            print(f"{category}: {', '.join(extensions)}")
-        return created_stacks
-    
-    # Count files per format and find XMP files
-    format_counts = {}
+    print("\n🔍 Finding image files...")
+    image_files = []
     xmp_files = []
-    for f in files:
+    format_counts = {}
+    total_images = 0
+    
+    for f in source_dir.rglob('*'):
+        if not f.is_file():
+            continue
+            
         ext = f.suffix.lower()
         if ext == '.xmp':
             xmp_files.append(f)
         elif ext in all_extensions:
+            image_files.append(f)
             format_counts[ext] = format_counts.get(ext, 0) + 1
-    
-    print("\n📊 Images found:")
+            total_images += 1
     
     # Group files by categories
     found_categories = {}
@@ -192,7 +229,7 @@ def stack_images(source_dir: Path, target_dir: Optional[Path] = None, stack_inte
     if total_images > 0:
         print(f"\n✅ Total: {total_images} image files")
     
-    # Get capture times for all files at once
+    # Get capture times for all files at once (bereits optimiert durch Batching)
     print("📅 Reading EXIF data in batch mode...")
     capture_times = get_capture_times(image_files)
     
@@ -203,60 +240,58 @@ def stack_images(source_dir: Path, target_dir: Optional[Path] = None, stack_inte
     
     if not image_files:
         print("❌ No usable files found!")
-        return
+        return []
 
+    # Sortiere Dateien nach Aufnahmezeit
+    sorted_files = sorted(image_files, key=lambda f: capture_times[f])
+    
+    # Identifiziere Stacks basierend auf Zeitintervallen
+    stacks = []
+    current_stack = []
     last_time = None
-    stack = []
-    stack_num = 1
-    stacks_created = 0
-    files_moved = 0
-    stack_sizes = []
-
-    for i, file in enumerate(image_files, 1):
+    
+    for file in sorted_files:
         capture_time = capture_times[file]
-        
-        # Show progress
-        progress = (i / len(image_files)) * 100
-        if i % max(1, len(image_files) // progress_update_count) == 0:
-            print(f"\r💾 Processing files: {progress:.1f}% ({i}/{len(image_files)})", end="")
-
         if last_time and (capture_time - last_time).total_seconds() > stack_interval:
-            if len(stack) >= min_stack_size:
-                stack_dir = target_path / stack_name_format.format(stack_num)
-                stack_dir.mkdir(parents=True, exist_ok=True)
-                for f in stack:
-                    move_file_with_sidecar(f, stack_dir)
-                    files_moved += 1
-                created_stacks.append(stack_dir)
-                stack_sizes.append((stack_num, len(stack)))
-                stacks_created += 1
-                stack_num += 1
-            stack = []
-
-        stack.append(file)
+            if len(current_stack) >= min_stack_size:
+                stacks.append(current_stack)
+            current_stack = []
+        current_stack.append(file)
         last_time = capture_time
-
-    # Process last stack
-    if len(stack) >= min_stack_size:
+    
+    # Letzten Stack hinzufügen, wenn groß genug
+    if len(current_stack) >= min_stack_size:
+        stacks.append(current_stack)
+    
+    # Erstelle Stack-Verzeichnisse parallel
+    created_stacks = []
+    files_to_move = []
+    stack_sizes = []
+    
+    for stack_num, stack_files in enumerate(stacks, 1):
         stack_dir = target_path / stack_name_format.format(stack_num)
         stack_dir.mkdir(parents=True, exist_ok=True)
-        for file in stack:
-            move_file_with_sidecar(file, stack_dir)
-            files_moved += 1
         created_stacks.append(stack_dir)
-        stack_sizes.append(len(stack))
-        stacks_created += 1
+        stack_sizes.append((stack_num, len(stack_files)))
+        
+        # Sammle alle Dateien zum Verschieben
+        files_to_move.extend([(f, stack_dir) for f in stack_files])
+    
+    # Verschiebe Dateien parallel
+    print("\n📦 Moving files in parallel...")
+    files_moved = move_files_batch(files_to_move)
 
     print("\r" + " " * 80 + "\r", end="")  # Clear the last progress indicator
-    print(f"✅ Done: {stacks_created} stacks created in {target_path.resolve()}")
+    print(f"✅ Done: {len(created_stacks)} stacks created in {target_path.resolve()}")
+    
     # Print stack overview
     if stack_sizes:
         print("\n📂 Stack overview:")
-        for i, size in enumerate(stack_sizes, 1):
-            stack_dir = target_path / stack_name_format.format(i)
+        for stack_num, size in stack_sizes:
+            stack_dir = target_path / stack_name_format.format(stack_num)
             xmp_count = len(list(stack_dir.glob("*.xmp")))
             xmp_info = f" (+{xmp_count} xmp)" if xmp_count > 0 else ""
-            print(f"Stack_{i:03d} → {size[1] if isinstance(size, tuple) else size} images{xmp_info}")
+            print(f"Stack_{stack_num:03d} → {size} images{xmp_info}")
         print(f"\n📁 {files_moved} files moved.")
         print(f"📁 Target directory: {target_path.resolve()}")
     else:
