@@ -12,6 +12,21 @@ from typing import List, Optional, Dict, Any
 from config_manager import ConfigManager
 
 
+class InterpolationMethod(Enum):
+    """HeliconFocus interpolation methods.
+    
+    Available methods:
+        BILINEAR (1): Bilinear interpolation
+        BICUBIC (2): Bicubic interpolation
+        LANCZOS3 (3): Lanczos 3 interpolation
+        LANCZOS8 (4): Lanczos 8 interpolation
+    """
+    BILINEAR = 1
+    BICUBIC = 2
+    LANCZOS3 = 3
+    LANCZOS8 = 4
+
+
 class Method(Enum):
     """HeliconFocus stacking methods.
     
@@ -40,6 +55,12 @@ class HeliconConfig:
         methods: Dictionary of enabled stacking methods. Keys are method names ('A', 'B',
             'C', 'AB'), values are boolean flags.
         helicon_path: Path to HeliconFocus executable
+        vertical_adjustment: Vertical shift adjustment (0-100)
+        horizontal_adjustment: Horizontal shift adjustment (0-100)
+        rotation_adjustment: Rotation adjustment (0-100)
+        magnification_adjustment: Magnification adjustment (0-100)
+        brightness_adjustment: Brightness adjustment value (0-100)
+        interpolation_method: Interpolation method (BILINEAR, BICUBIC, LANCZOS3, LANCZOS8)
     """
     radius: int = 3
     smoothing: int = 1
@@ -47,6 +68,12 @@ class HeliconConfig:
     output_format: str = 'dng'
     methods: Dict[str, bool] = None
     helicon_path: str = '/Applications/HeliconFocus.app/Contents/MacOS/HeliconFocus'
+    vertical_adjustment: int = 25
+    horizontal_adjustment: int = 25
+    rotation_adjustment: int = 25
+    magnification_adjustment: int = 10
+    brightness_adjustment: int = 25
+    interpolation_method: InterpolationMethod = InterpolationMethod.BICUBIC
     
     @property
     def enabled_methods(self) -> List[Method]:
@@ -83,6 +110,13 @@ class HeliconConfig:
         config = ConfigManager().get_config()
         helicon_config = config.get('helicon_focus', {})
         
+        # Get interpolation method from config
+        interpolation_name = helicon_config.get('interpolation_method', 'BICUBIC')
+        try:
+            interpolation = InterpolationMethod[interpolation_name.upper()]
+        except KeyError:
+            interpolation = InterpolationMethod.BICUBIC
+        
         return cls(
             radius=helicon_config.get('radius', 3),
             smoothing=helicon_config.get('smoothing', 1),
@@ -90,7 +124,13 @@ class HeliconConfig:
             output_format=helicon_config.get('output_format', 'dng'),
             methods=helicon_config.get('methods', None),
             helicon_path=helicon_config.get('helicon_path', 
-                '/Applications/HeliconFocus.app/Contents/MacOS/HeliconFocus')
+                '/Applications/HeliconFocus.app/Contents/MacOS/HeliconFocus'),
+            vertical_adjustment=helicon_config.get('vertical_adjustment', 25),
+            horizontal_adjustment=helicon_config.get('horizontal_adjustment', 25),
+            rotation_adjustment=helicon_config.get('rotation_adjustment', 25),
+            magnification_adjustment=helicon_config.get('magnification_adjustment', 10),
+            brightness_adjustment=helicon_config.get('brightness_adjustment', True),
+            interpolation_method=interpolation
         )
     
     def __post_init__(self):
@@ -105,6 +145,16 @@ class HeliconConfig:
             raise ValueError("Output format must be 'jpg', 'tif', or 'dng'")
         if not Path(self.helicon_path).exists():
             raise FileNotFoundError(f"HeliconFocus not found at {self.helicon_path}")
+        if not 0 <= self.vertical_adjustment <= 100:
+            raise ValueError("Vertical adjustment must be between 0 and 100")
+        if not 0 <= self.horizontal_adjustment <= 100:
+            raise ValueError("Horizontal adjustment must be between 0 and 100")
+        if not 0 <= self.rotation_adjustment <= 100:
+            raise ValueError("Rotation adjustment must be between 0 and 100")
+        if not 0 <= self.magnification_adjustment <= 100:
+            raise ValueError("Magnification adjustment must be between 0 and 100")
+        if not 0 <= self.brightness_adjustment <= 100:
+            raise ValueError("Brightness adjustment must be between 0 and 100")
 
 
 def create_input_file(stack_dir: Path, supported_extensions: List[str]) -> Optional[Path]:
@@ -257,7 +307,13 @@ def process_stack(
             f'-save:{output_file}',
             f'-mp:{method.value}',  # Method parameter (A=0, B=1, C=2)
             f'-rp:{config.radius}',  # Radius parameter
-            f'-sp:{config.smoothing}'  # Smoothing parameter
+            f'-sp:{config.smoothing}',  # Smoothing parameter
+            f'-va:{config.vertical_adjustment}',  # Vertical adjustment
+            f'-ha:{config.horizontal_adjustment}',  # Horizontal adjustment
+            f'-ra:{config.rotation_adjustment}',  # Rotation adjustment
+            f'-ma:{config.magnification_adjustment}',  # Magnification adjustment
+            f'-ba:{config.brightness_adjustment}',  # Brightness adjustment
+            f'-im:{config.interpolation_method.value}'  # Interpolation method
         ]
         
         # Add JPEG quality only for JPG output
@@ -296,8 +352,14 @@ def process_stack(
                     '-i', str(ab_input),
                     f'-save:{ab_file}',
                     '-mp:1',  # Method B for combination
-                    f'-rp:{config.radius}',
-                    f'-sp:{config.smoothing}'
+                    f'-rp:{config.radius}',  # Radius parameter
+                    f'-sp:{config.smoothing}',  # Smoothing parameter
+                    f'-va:{config.vertical_adjustment}',  # Vertical adjustment
+                    f'-ha:{config.horizontal_adjustment}',  # Horizontal adjustment
+                    f'-ra:{config.rotation_adjustment}',  # Rotation adjustment
+                    f'-ma:{config.magnification_adjustment}',  # Magnification adjustment
+                    f'-ba:{config.brightness_adjustment}',  # Brightness adjustment
+                    f'-im:{config.interpolation_method.value}'  # Interpolation method
                 ]
                 
                 # Add JPEG quality only for JPG output

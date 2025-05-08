@@ -25,6 +25,12 @@
         "jpeg_quality": 95,
         "output_format": "dng",
         "helicon_path": "/Applications/HeliconFocus.app/Contents/MacOS/HeliconFocus",
+        "vertical_adjustment": 25,
+        "horizontal_adjustment": 25,
+        "rotation_adjustment": 25,
+        "magnification_adjustment": 10,
+        "brightness_adjustment": 25,
+        "interpolation_method": "LANCZOS3",
         "methods": {
             "A": true,
             "B": true,

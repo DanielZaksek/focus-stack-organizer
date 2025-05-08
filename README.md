@@ -153,12 +153,18 @@ Here's a practical example for macro photography with an Olympus OM-1:
         "min_stack_size": 2,
         "stack_name_format": "Stack_{:03d}"
     },
-    "helicon": {
+    "helicon_focus": {
        "radius": 3,
        "smoothing": 1,
        "jpeg_quality": 95,
        "output_format": "dng",
        "helicon_path": "/Applications/HeliconFocus.app/Contents/MacOS/HeliconFocus",
+       "vertical_adjustment": 25,
+       "horizontal_adjustment": 25,
+       "rotation_adjustment": 25,
+       "magnification_adjustment": 10,
+       "brightness_adjustment": true,
+       "interpolation_method": "LANCZOS3",
        "methods": {
             "A": true,
             "B": true,
@@ -186,12 +192,42 @@ Here's a practical example for macro photography with an Olympus OM-1:
 
 #### Helicon Focus Settings
 
-- `radius`: Radius parameter (1-16)
-- `smoothing`: Smoothing parameter (0-8)
-- `jpeg_quality`: Output quality (1-100)
-- `output_format`: Output format (dng, jpg)
+##### Basic Parameters
+
+- `radius`: Radius parameter (1-8) - Higher values include more distant areas when calculating the depth map
+- `smoothing`: Smoothing parameter (0-4) - Higher values reduce noise but may also reduce sharpness
+- `jpeg_quality`: Output quality (1-100) - Only used when output_format is 'jpg'
+- `output_format`: Output format ('dng', 'jpg', 'tif') - DNG preserves the most information
 - `helicon_path`: Path to Helicon Focus executable
+
+##### Image Alignment Parameters
+
+- `vertical_adjustment`: Vertical shift adjustment (0-100, default: 25)
+  - Controls the maximum vertical shift when aligning images
+- `horizontal_adjustment`: Horizontal shift adjustment (0-100, default: 25)
+  - Controls the maximum horizontal shift when aligning images
+- `rotation_adjustment`: Rotation adjustment (0-100, default: 25)
+  - Controls the maximum rotation angle when aligning images
+- `magnification_adjustment`: Magnification adjustment (0-100, default: 10)
+  - Controls the maximum scale change when aligning images
+- `brightness_adjustment`: Brightness adjustment (0-100, default: 25)
+  - Controls the brightness equalization between images
+
+##### Interpolation Method
+
+- `interpolation_method`: Image interpolation method (default: LANCZOS8)
+  - `BILINEAR`: Bilinear interpolation (fastest, lowest quality)
+  - `BICUBIC`: Bicubic interpolation (good balance of speed/quality)
+  - `LANCZOS3`: Lanczos-3 interpolation (high quality)
+  - `LANCZOS8`: Lanczos-8 interpolation (highest quality, slowest)
+
+##### Stacking Methods
+
 - `methods`: Methods to process (A, B, C, AB)
+  - `A`: Better for sharp edges and high contrast (true/false)
+  - `B`: Better for smooth transitions (true/false)
+  - `C`: Combination of A and B characteristics (true/false)
+  - `AB`: Creates a combination of methods A and B (true/false)
 
 ### Managing Configuration
 
