@@ -8,25 +8,10 @@ from datetime import datetime
 from enum import Enum, auto
 from pathlib import Path
 from typing import Dict, List, Optional, Set
+from common import ImageFormat
 
 
-class ImageFormat(Enum):
-    """Supported image formats."""
-    RAW = auto()
-    STANDARD = auto()
 
-    @classmethod
-    def extensions(cls) -> Dict[str, Set[str]]:
-        """Get supported file extensions for each format."""
-        return {
-            'RAW': {".orf", ".nef", ".cr2", ".arw", ".rw2", ".raf", ".dng"},  # Olympus, Nikon, Canon, Sony, Panasonic, Fuji, Adobe
-            'STANDARD': {".jpg", ".jpeg", ".tiff", ".tif", ".png"},
-        }
-
-    @classmethod
-    def all_extensions(cls) -> Set[str]:
-        """Get all supported file extensions."""
-        return {ext.lower() for exts in cls.extensions().values() for ext in exts}
 
 
 @dataclass
@@ -58,13 +43,29 @@ class SorterConfig:
             raise ValueError("Stack interval must be greater than 0 seconds")
 
 
-def get_capture_times(filepaths):
-    """Get capture times for multiple files in one exiftool call."""
+def get_capture_times(filepaths, exif_config=None):
+    """Get capture times for multiple files in one exiftool call.
+    
+    Args:
+        filepaths: List of files to process
+        exif_config: Optional dictionary with exiftool configuration
+            - date_format: Format string for date parsing
+            - exif_tag: EXIF tag to read date from
+    """
+    if exif_config is None:
+        from config_manager import ConfigManager
+        config = ConfigManager().get_config()
+        exif_config = config.get('sorter', {}).get('exiftool', {
+            'date_format': '%Y:%m:%d %H:%M:%S',
+            'exif_tag': 'DateTimeOriginal'
+        })
+    
     try:
         # Use exiftool to read EXIF data for all files at once
-        cmd = ['exiftool', '-DateTimeOriginal', '-d', '%Y:%m:%d %H:%M:%S', '-json'] + [str(f) for f in filepaths]
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        cmd = ['exiftool', f"-{exif_config['exif_tag']}", '-d', exif_config['date_format'], '-json']
+        cmd.extend(str(f) for f in filepaths)
         
+        result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             print(f"Error running exiftool: {result.stderr}")
             return {}
@@ -75,11 +76,12 @@ def get_capture_times(filepaths):
         
         # Create dictionary of filepath -> capture time
         times = {}
+        tag_name = exif_config['exif_tag']
         for item in data:
             filepath = Path(item['SourceFile'])
-            if 'DateTimeOriginal' in item:
+            if tag_name in item:
                 try:
-                    times[filepath] = datetime.strptime(item['DateTimeOriginal'], "%Y:%m:%d %H:%M:%S")
+                    times[filepath] = datetime.strptime(item[tag_name], exif_config['date_format'])
                 except Exception as e:
                     print(f"Error parsing date for {filepath}: {e}")
         
@@ -101,7 +103,7 @@ def move_file_with_sidecar(file_path, target_dir):
 
 
 
-def stack_images(source_dir: Path, target_dir: Optional[Path] = None, stack_interval: float = 1.0) -> List[Path]:
+def stack_images(source_dir: Path, target_dir: Optional[Path] = None, stack_interval: Optional[float] = None) -> List[Path]:
     """Sort images into focus stacks based on capture time intervals.
     
     This function analyzes a directory for supported image files and groups them into
@@ -118,6 +120,17 @@ def stack_images(source_dir: Path, target_dir: Optional[Path] = None, stack_inte
         images for one focus stack and will be named 'Stack_XXX' where XXX is a
         sequential number.
     """
+    # Load configuration
+    from config_manager import ConfigManager
+    config = ConfigManager().get_config()
+    focus_config = config.get('sorter', {})
+    
+    # Use configuration or defaults
+    stack_interval = stack_interval or focus_config.get('stack_interval', 1.0)
+    min_stack_size = focus_config.get('min_stack_size', 2)
+    stack_name_format = focus_config.get('stack_name_format', 'Stack_{:03d}')
+    progress_update_count = focus_config.get('progress_update_count', 20)
+    
     source_path = Path(source_dir)
     target_path = target_dir if target_dir else source_path
     created_stacks = []  # List of created stack directories
@@ -204,12 +217,12 @@ def stack_images(source_dir: Path, target_dir: Optional[Path] = None, stack_inte
         
         # Show progress
         progress = (i / len(image_files)) * 100
-        if i % max(1, len(image_files) // 20) == 0:  # Update ~20 times total
+        if i % max(1, len(image_files) // progress_update_count) == 0:
             print(f"\r💾 Processing files: {progress:.1f}% ({i}/{len(image_files)})", end="")
 
         if last_time and (capture_time - last_time).total_seconds() > stack_interval:
-            if len(stack) > 1:
-                stack_dir = target_path / f"Stack_{stack_num:03}"
+            if len(stack) >= min_stack_size:
+                stack_dir = target_path / stack_name_format.format(stack_num)
                 stack_dir.mkdir(parents=True, exist_ok=True)
                 for f in stack:
                     move_file_with_sidecar(f, stack_dir)
@@ -224,8 +237,8 @@ def stack_images(source_dir: Path, target_dir: Optional[Path] = None, stack_inte
         last_time = capture_time
 
     # Process last stack
-    if len(stack) > 1:
-        stack_dir = target_path / f"Stack_{stack_num:03}"
+    if len(stack) >= min_stack_size:
+        stack_dir = target_path / stack_name_format.format(stack_num)
         stack_dir.mkdir(parents=True, exist_ok=True)
         for file in stack:
             move_file_with_sidecar(file, stack_dir)
@@ -240,7 +253,7 @@ def stack_images(source_dir: Path, target_dir: Optional[Path] = None, stack_inte
     if stack_sizes:
         print("\n📂 Stack overview:")
         for i, size in enumerate(stack_sizes, 1):
-            stack_dir = target_path / f"Stack_{i:03d}"
+            stack_dir = target_path / stack_name_format.format(i)
             xmp_count = len(list(stack_dir.glob("*.xmp")))
             xmp_info = f" (+{xmp_count} xmp)" if xmp_count > 0 else ""
             print(f"Stack_{i:03d} → {size[1] if isinstance(size, tuple) else size} images{xmp_info}")

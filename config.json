@@ -1,0 +1,35 @@
+{
+    "import": {
+        "default_destination": "",
+        "max_threads": 4,
+        "skip_existing": true,
+        "copy_xmp_files": true,
+        "file_organization": {
+            "date_format": "%Y-%m-%d",
+            "add_sequence_number": true
+        }
+    },
+    "sorter": {
+        "stack_interval": 1.0,
+        "min_stack_size": 2,
+        "stack_name_format": "Stack_{:03d}",
+        "progress_update_count": 20,
+        "exiftool": {
+            "date_format": "%Y:%m:%d %H:%M:%S",
+            "exif_tag": "DateTimeOriginal"
+        }
+    }, 
+    "helicon_focus": {
+        "radius": 3,
+        "smoothing": 1,
+        "jpeg_quality": 95,
+        "output_format": "dng",
+        "helicon_path": "/Applications/HeliconFocus.app/Contents/MacOS/HeliconFocus",
+        "methods": {
+            "A": true,
+            "B": true,
+            "C": true,
+            "AB": true
+        }
+    }
+}

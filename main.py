@@ -8,75 +8,38 @@ and Helicon Focus functionality independently.
 import os
 import sys
 import time
+import argparse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
 from focus_stack_sorter import stack_images, ImageFormat
 from helicon_focus import process_stack
+from image_importer import import_images
+from config_manager import ConfigManager
 
 
-@dataclass
-class HeliconConfig:
-    """Configuration for Helicon Focus processing.
-    
-    Args:
-        radius: Radius parameter for HeliconFocus (1-8)
-        smoothing: Smoothing parameter for HeliconFocus (0-4)
-        jpeg_quality: JPEG quality if output_format is 'jpg' (1-100)
-        output_format: Output format ('jpg', 'tif', or 'dng')
-        combine_ab: Whether to combine methods A and B
-    """
-    radius: int = 3
-    smoothing: int = 1
-    jpeg_quality: int = 95
-    output_format: str = "dng"
-    combine_ab: bool = True
-
-    def __post_init__(self):
-        """Validate configuration parameters."""
-        if not 1 <= self.radius <= 8:
-            raise ValueError("Radius must be between 1 and 8")
-        if not 0 <= self.smoothing <= 4:
-            raise ValueError("Smoothing must be between 0 and 4")
-        if not 1 <= self.jpeg_quality <= 100:
-            raise ValueError("JPEG quality must be between 1 and 100")
-        if self.output_format not in ["jpg", "tif", "dng"]:
-            raise ValueError("Output format must be 'jpg', 'tif', or 'dng'")
+from helicon_focus import HeliconConfig, process_stack
 
 
 def add_helicon_args(parser: argparse.ArgumentParser) -> None:
     """Add Helicon Focus arguments to a parser."""
-    parser.add_argument("--radius", type=int, default=3,
-                      help="Radius parameter for HeliconFocus (default: 3)")
-    parser.add_argument("--smoothing", type=int, default=1,
-                      help="Smoothing parameter for HeliconFocus (default: 1)")
-    parser.add_argument("--jpeg-quality", type=int, default=95,
-                      help="JPEG quality 1-100 (default: 95)")
-    parser.add_argument("--output-format", choices=['jpg', 'tif', 'dng'], default='dng',
-                      help="Output format (default: dng)")
-    parser.add_argument("--no-ab", action="store_true",
-                      help="Skip A+B combination in HeliconFocus processing")
+    # No arguments needed as configuration is handled via config.json
+    pass
 
 
 def get_helicon_config(args: argparse.Namespace) -> HeliconConfig:
-    """Create HeliconConfig from parsed arguments."""
-    return HeliconConfig(
-        radius=args.radius,
-        smoothing=args.smoothing,
-        jpeg_quality=args.jpeg_quality,
-        output_format=args.output_format,
-        combine_ab=not args.no_ab
-    )
+    """Create HeliconConfig from config.json."""
+    return HeliconConfig.from_config()
 
 
-def process_with_helicon(stack_dir: Path, output_dir: Path, config: HeliconConfig) -> List[Path]:
+def process_with_helicon(stack_dir: Path, output_dir: Path, config: Optional[HeliconConfig] = None) -> List[Path]:
     """Process a stack with Helicon Focus.
     
     Args:
         stack_dir: Directory containing images to stack
         output_dir: Directory for output files
-        config: HeliconFocus configuration
+        config: Optional HeliconFocus configuration. If None, uses config.json settings.
         
     Returns:
         List[Path]: Paths to created output files
@@ -89,11 +52,7 @@ def process_with_helicon(stack_dir: Path, output_dir: Path, config: HeliconConfi
     return process_stack(
         stack_dir=stack_dir,
         output_dir=output_dir,
-        radius=config.radius,
-        smoothing=config.smoothing,
-        jpeg_quality=config.jpeg_quality,
-        output_format=config.output_format,
-        combine_ab=config.combine_ab
+        config=config
     )
 
     return results or []
@@ -118,6 +77,17 @@ def main() -> None:
     """Main entry point for the Focus Stack Organizer."""
     parser = argparse.ArgumentParser(description="Focus Stack Organizer Control Center")
     subparsers = parser.add_subparsers(dest="command", help="Commands")
+
+    # Import command
+    import_parser = subparsers.add_parser('import', help='Import images from SD card')
+    import_parser.add_argument('source_dir', help='Source directory containing images')
+    import_parser.add_argument('target_dir', nargs='?', help='Target directory for import')
+    import_parser.add_argument('--set-default', action='store_true', help='Set target directory as default destination')
+
+    # Config commands
+    config_parser = subparsers.add_parser("config", help="Configure default settings")
+    config_parser.add_argument("--set-import-destination", help="Set default import destination directory")
+    config_parser.add_argument("--show", action="store_true", help="Show current configuration")
 
     # Focus Stack Sorter command
     sort_parser = subparsers.add_parser("sort", help="Sort and organize focus stacks")
@@ -202,6 +172,45 @@ def main() -> None:
         print(f"\n📚 Found {len(image_files)} images in directory")
         output_path = Path(args.output_dir) if args.output_dir else stack_path / "stacked"
         process_with_helicon(stack_path, output_path, config)
+
+    elif args.command == "config":
+        config_manager = ConfigManager()
+        
+        if args.set_import_destination:
+            config_manager.set_default_import_destination(args.set_import_destination)
+            print(f"\n✅ Default import destination set to: {args.set_import_destination}")
+        
+        if args.show:
+            default_import_dest = config_manager.get_default_import_destination()
+            print("\nCurrent configuration:")
+            print(f"Default import destination: {default_import_dest or 'Not set'}")
+
+    elif args.command == "import":
+        config_manager = ConfigManager()
+        source_path = Path(args.source_dir)
+        
+        # Use target_dir if provided, otherwise use default from config
+        target_path = None
+        if args.target_dir:
+            target_path = Path(args.target_dir)
+        else:
+            target_path = config_manager.get_default_destination()
+        if not target_path:
+            print("❌ No target directory specified and no default set in config")
+            return
+
+        # Set as default if requested
+        if args.set_default:
+            config_manager.set_default_destination(target_path)
+
+        print(f"\n📸 Starting Image Import")
+        print(f"Source directory: {source_path}")
+        print(f"Target directory: {target_path}")
+
+        if import_images(source_path, target_path):
+            print("\n✅ Import complete!")
+        else:
+            sys.exit(1)
 
     elif args.command == "sort-and-stack":
         source_path = Path(args.source_dir)
