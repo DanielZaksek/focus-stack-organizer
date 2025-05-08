@@ -5,7 +5,7 @@ import subprocess
 from concurrent import futures
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set, Tuple
 from common import ImageFormat
 from config_manager import ConfigManager
 
@@ -53,30 +53,32 @@ def check_directory_access(path, is_source=True):
         is_source: True if this is a source directory, False if destination
     
     Returns:
-        tuple: (bool, str) - (success, error_message)
+        tuple: (bool, Set[Path], str) - (success, created_dirs, error_message)
     """
     try:
         path = Path(path)
         if not path.exists():
             if is_source:
-                return False, f"Source directory does not exist: {path}"
+                return False, set(), f"Source directory does not exist: {path}"
             # For destination, we'll try to create it
             try:
                 path.mkdir(parents=True, exist_ok=True)
             except Exception as e:
-                return False, f"Could not create destination directory {path}: {e}"
+                return False, set(), f"Could not create destination directory {path}: {e}"
         
         # Check if we can read/write
         if is_source:
             if not os.access(path, os.R_OK):
-                return False, f"Cannot read from source directory: {path}"
+                return False, set(), f"Cannot read from source directory: {path}"
         else:
             if not os.access(path, os.W_OK):
-                return False, f"Cannot write to destination directory: {path}"
+                return False, set(), f"Cannot write to destination directory: {path}"
                 
-        return True, ""
+        return True, created_dirs, ""
     except Exception as e:
-        return False, f"Error checking directory {path}: {e}"
+        return False, set(), f"Error checking directory {path}: {e}"
+
+created_dirs: Set[Path] = set()
 
 def copy_file_with_date(args):
     """Copy a single file to its date-based destination."""
@@ -88,6 +90,7 @@ def copy_file_with_date(args):
 
         year_dir.mkdir(exist_ok=True)
         date_dir.mkdir(exist_ok=True)
+        created_dirs.add(date_dir)
 
         # Copy file to destination
         dest_file = date_dir / image_path.name
@@ -108,7 +111,7 @@ def copy_file_with_date(args):
         print(f"Error copying {image_path}: {e}")
         return 'error', image_path
 
-def import_images(source_path: str, destination_path: Optional[str] = None) -> bool:
+def import_images(source_path: str, destination_path: Optional[str] = None) -> Tuple[bool, Set[Path]]:
     """Import images from source to destination, organizing by date.
 
     Args:
@@ -127,17 +130,17 @@ def import_images(source_path: str, destination_path: Optional[str] = None) -> b
     if destination_path is None:
         if not config.get('import', {}).get('default_destination'):
             print("❌ No destination directory specified and no default set in config")
-            return False
+            return False, set()
         destination_path = Path(config['import']['default_destination'])
     else:
         destination_path = Path(destination_path)
 
     # Check directories
     for path, is_source in [(source_path, True), (destination_path, False)]:
-        success, error = check_directory_access(path, is_source)
+        success, dirs, error = check_directory_access(path, is_source)
         if not success:
             print(f"Error accessing {'source' if is_source else 'destination'} directory: {error}")
-            return False
+            return False, set()
 
     # Find all image files
     print("🔍 Scanning for images...")
@@ -199,4 +202,4 @@ def import_images(source_path: str, destination_path: Optional[str] = None) -> b
     print(f"⏭️ Skipped (already exist): {skipped_count}")
     print(f"❌ Errors: {error_count}")
 
-    return error_count == 0
+    return error_count == 0, created_dirs

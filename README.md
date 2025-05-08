@@ -11,86 +11,231 @@ A tool for organizing and stacking focus stacking images with Helicon Focus. Per
 - Progress display and detailed statistics
 - Flexible stack processing configuration
 
-## Roadmap 🎯
-
-- [x] Basic focus stack sorting
-- [x] Support for RAW formats
-- [x] XMP sidecar file handling
-- [x] Automatic stacking with HeliconFocus (methods A, B, C and A+B)
-- [ ] Graphical User Interface (GUI)
-- [ ] Drag & Drop functionality
-
-## Prerequisites 📋
+## Requirements
 
 - Python 3.6 or higher
-- [Helicon Focus](https://www.heliconsoft.com/heliconsoft-products/helicon-focus/)
-- ExifTool for EXIF data processing
+- Helicon Focus (for stacking)
+- ExifTool (for reading metadata)
 
-## Installation 🔧
+## Installation
 
-1. Clone the repository:
+1. Clone this repository
+2. Install requirements: `pip install -r requirements.txt`
+3. Install ExifTool: [Download ExifTool](https://exiftool.org)
+4. Install Helicon Focus: [Download Helicon Focus](https://www.heliconsoft.com/heliconsoft-products/helicon-focus/)
 
-   ```bash
-   git clone https://github.com/yourusername/focus-stack-organizer.git
-   cd focus-stack-organizer
-   ```
+## Available Commands
 
-2. Install ExifTool:
+### 1. Import Only
 
-   ```bash
-   # macOS with Homebrew
-   brew install exiftool
-
-   # Linux (Debian/Ubuntu)
-   sudo apt-get install exiftool
-
-   # Windows
-   # Download ExifTool from https://exiftool.org/
-   ```
-
-3. Install [Helicon Focus](https://www.heliconsoft.com/heliconsoft-products/helicon-focus/)
-
-## Usage 🚀
-
-The tool provides three main commands:
-
-### 1. Sort Only
+Import images from source to destination, organizing by date:
 
 ```bash
-python main.py sort <source_dir> [options]
-
-Options:
-  --target-dir <dir>    Target directory for sorted stacks
-  --interval <seconds>  Time interval between captures (default: 1.0)
+python3 main.py import <source_dir> [destination_dir]
 ```
 
-### 2. Stack Only
+Example:
 
 ```bash
-python main.py stack <stack_dir> [options]
-
-Options:
-  --output-dir <dir>    Output directory for stacked images
-  --radius <1-8>       Radius parameter for HeliconFocus (default: 3)
-  --smoothing <0-4>    Smoothing parameter for HeliconFocus (default: 1)
-  --jpeg-quality <1-100> JPEG quality (default: 95)
-  --output-format <format> Output format (jpg, tif, dng) (default: dng)
-  --no-ab             Skip A+B combination
+python3 main.py import /path/to/sd-card /path/to/photos
 ```
 
-### 3. Sort and Stack
+### 2. Import and Sort
+
+Import images and sort them into stacks:
 
 ```bash
-python main.py sort-and-stack <source_dir> [options]
+python3 main.py import-sort <source_dir> [destination_dir]
+```
 
-Options:
-  Combines all options from 'sort' and 'stack'
+Example:
+
+```bash
+python3 main.py import-sort /path/to/sd-card /path/to/photos
+```
+
+### 3. Sort Only
+
+Sort existing images in a directory into stacks:
+
+```bash
+python3 main.py sort <directory>
+```
+
+Example:
+
+```bash
+python3 main.py sort /path/to/photos/2025/2025-05-08
+```
+
+### 4. Stack Only
+
+Process a directory with Helicon Focus:
+
+```bash
+python3 main.py stack <directory>
+```
+
+Example:
+
+```bash
+python3 main.py stack /path/to/photos/2025/2025-05-08/Stack_1
+```
+
+### 5. Sort and Stack
+
+Sort images into stacks and process with Helicon Focus:
+
+```bash
+python3 main.py sort-stack <directory>
+```
+
+Example:
+
+```bash
+python3 main.py sort-stack /path/to/photos/2025/2025-05-08
+```
+
+### 6. Automatic Workflow
+
+Import, sort, and stack images in one go:
+
+```bash
+python3 main.py auto <source_dir> [destination_dir]
+```
+
+Example:
+
+```bash
+python3 main.py auto /path/to/sd-card /path/to/photos
+```
+
+## Configuration
+
+The application is configured via `config.json`. Here's a full example with all available options:
+
+```json
+{
+    "import": {
+        "default_destination": "/path/to/photos",
+        "max_threads": 4,
+        "skip_existing": true,
+        "copy_xmp_files": true
+    },
+    "sorter": {
+        "stack_interval": 1.0,
+        "min_stack_size": 2,
+        "stack_name_format": "Stack_{:03d}"
+    },
+    "helicon": {
+        "method": "A",
+        "radius": 8,
+        "smoothing": 4,
+        "quality": 3
+    }
+}
+```
+
+### Example Configuration
+
+Here's a practical example for macro photography with an Olympus OM-1:
+
+```json
+{
+    "import": {
+        "default_destination": "~/Pictures/Macro",
+        "max_threads": 8,
+        "skip_existing": true,
+        "copy_xmp_files": true
+    },
+    "sorter": {
+        "stack_interval": 1,
+        "min_stack_size": 2,
+        "stack_name_format": "Stack_{:03d}"
+    },
+    "helicon": {
+       "radius": 3,
+       "smoothing": 1,
+       "jpeg_quality": 95,
+       "output_format": "dng",
+       "helicon_path": "/Applications/HeliconFocus.app/Contents/MacOS/HeliconFocus",
+       "methods": {
+            "A": true,
+            "B": true,
+            "C": true,
+            "AB": true
+        }
+    }
+}
+```
+
+### Configuration Options
+
+#### Import Settings
+
+- `default_destination`: Default path for imported images
+- `max_threads`: Number of parallel copy operations (default: 4)
+- `skip_existing`: Skip files that already exist (default: true)
+- `copy_xmp_files`: Copy XMP sidecar files if they exist (default: true)
+
+#### Sorter Settings
+
+- `stack_interval`: Time interval between shots to separate stacks (seconds)
+- `min_stack_size`: Minimum number of images to create a stack (default: 2)
+- `stack_name_format`: Format string for stack directory names
+
+#### Helicon Focus Settings
+
+- `radius`: Radius parameter (1-16)
+- `smoothing`: Smoothing parameter (0-8)
+- `jpeg_quality`: Output quality (1-100)
+- `output_format`: Output format (dng, jpg)
+- `helicon_path`: Path to Helicon Focus executable
+- `methods`: Methods to process (A, B, C, AB)
+
+### Managing Configuration
+
+View current configuration:
+
+```bash
+python3 main.py config --show
+```
+
+Set default import destination:
+
+```bash
+python3 main.py config --set-import-destination /path/to/photos
+```
+
+## Directory Structure
+
+The importer creates a date-based directory structure:
+
+```text
+/path/to/photos/
+    └── 2025/
+        └── 2025-05-08/
+            ├── Stack_001/
+            │   ├── IMG_0001.CR3
+            │   ├── IMG_0002.CR3
+            │   └── stacked/
+            │       └── stack.jpg
+            └── Stack_002/
+                ├── IMG_0003.CR3
+                ├── IMG_0004.CR3
+                └── stacked/
+                    └── stack.jpg
 ```
 
 ## Examples
 
 ```bash
-# Sort images with 2-second interval
+python3 main.py import /path/to/sd-card /path/to/photos
+python3 main.py import-sort /path/to/sd-card /path/to/photos
+python3 main.py sort /path/to/photos/2025/2025-05-08
+python3 main.py stack /path/to/photos/2025/2025-05-08/Stack_1
+python3 main.py sort-stack /path/to/photos/2025/2025-05-08
+python3 main.py auto /path/to/sd-card /path/to/photos
 python main.py sort ~/Pictures/OM1_RAWs --interval 2
 
 # Process existing stacks
