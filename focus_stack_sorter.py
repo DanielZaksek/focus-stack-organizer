@@ -3,9 +3,60 @@ import sys
 import shutil
 import subprocess
 import time
+from dataclasses import dataclass
 from datetime import datetime
+from enum import Enum, auto
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Set
+
+
+class ImageFormat(Enum):
+    """Supported image formats."""
+    RAW = auto()
+    STANDARD = auto()
+
+    @classmethod
+    def extensions(cls) -> Dict[str, Set[str]]:
+        """Get supported file extensions for each format."""
+        return {
+            'RAW': {".orf", ".nef", ".cr2", ".arw", ".rw2", ".raf", ".dng"},  # Olympus, Nikon, Canon, Sony, Panasonic, Fuji, Adobe
+            'STANDARD': {".jpg", ".jpeg", ".tiff", ".tif", ".png"},
+        }
+
+    @classmethod
+    def all_extensions(cls) -> Set[str]:
+        """Get all supported file extensions."""
+        return {ext.lower() for exts in cls.extensions().values() for ext in exts}
+
+
+@dataclass
+class SorterConfig:
+    """Configuration for focus stack sorting.
+    
+    Args:
+        source_dir: Directory containing images to sort
+        target_dir: Optional output directory. If not specified, uses source_dir.
+        stack_interval: Time interval in seconds to group images. Default is 1 second.
+    """
+    source_dir: Path
+    target_dir: Optional[Path] = None
+    stack_interval: float = 1.0
+
+    def __post_init__(self):
+        """Validate and process configuration after initialization."""
+        # Convert paths to Path objects
+        self.source_dir = Path(self.source_dir)
+        if self.target_dir is None:
+            self.target_dir = self.source_dir
+        else:
+            self.target_dir = Path(self.target_dir)
+            
+        # Validate parameters
+        if not self.source_dir.exists():
+            raise FileNotFoundError(f"Source directory does not exist: {self.source_dir}")
+        if self.stack_interval <= 0:
+            raise ValueError("Stack interval must be greater than 0 seconds")
+
 
 def get_capture_times(filepaths):
     """Get capture times for multiple files in one exiftool call."""
@@ -48,32 +99,36 @@ def move_file_with_sidecar(file_path, target_dir):
     if xmp_path.exists():
         shutil.move(str(xmp_path), target_dir)
 
-def run_helicon_focus(stack_dir: Path, output_dir: Path, use_tiff: bool = False, combine_ab: bool = True) -> None:
-    """Process a stack with Helicon Focus using methods A, B, C and optionally combine A+B."""
-    from helicon_focus import process_stack
-    process_stack(stack_dir, output_dir, combine_ab=combine_ab)
 
-def stack_images(source_dir, target_dir=None, stack_interval=1) -> List[Path]:
-    print(f"\n🔍 Analyzing directory: {source_dir}")
+
+def stack_images(source_dir: Path, target_dir: Optional[Path] = None, stack_interval: float = 1.0) -> List[Path]:
+    """Sort images into focus stacks based on capture time intervals.
+    
+    This function analyzes a directory for supported image files and groups them into
+    stacks based on their capture times. Images taken within the specified interval
+    are considered part of the same stack.
+    
+    Args:
+        source_dir: Directory containing images to sort
+        target_dir: Optional output directory. If not specified, uses source_dir.
+        stack_interval: Time interval in seconds to group images. Default is 1 second.
+        
+    Returns:
+        List[Path]: List of created stack directories. Each directory contains the
+        images for one focus stack and will be named 'Stack_XXX' where XXX is a
+        sequential number.
+    """
     source_path = Path(source_dir)
+    target_path = target_dir if target_dir else source_path
     created_stacks = []  # List of created stack directories
     stack_count = 0  # Initialize stack counter
-    if target_dir:
-        target_path = Path(target_dir)
-    else:
-        target_path = source_path
 
+    print(f"\n🔍 Analyzing directory: {source_path}")
     print("💾 Searching for image files...")
+    
+    # Get all files and supported extensions
     files = sorted(source_path.glob("*.*"))
-    
-    # Supported image formats
-    supported_formats = {
-        'RAW': [".orf", ".nef", ".cr2", ".arw", ".rw2", ".raf", ".dng"],  # Olympus, Nikon, Canon, Sony, Panasonic, Fuji, Adobe
-        'Standard': [".jpg", ".jpeg", ".tiff", ".tif", ".png"],
-    }
-    
-    # Create flat list of all extensions
-    all_extensions = [ext.lower() for exts in supported_formats.values() for ext in exts]
+    all_extensions = ImageFormat.all_extensions()
     
     # Find all image files
     image_files = [f for f in files if f.suffix.lower() in all_extensions]
@@ -82,9 +137,9 @@ def stack_images(source_dir, target_dir=None, stack_interval=1) -> List[Path]:
     if total_images == 0:
         print("⚠️ No supported image files found!")
         print("\nSupported formats:")
-        for category, extensions in supported_formats.items():
+        for category, extensions in ImageFormat.extensions().items():
             print(f"{category}: {', '.join(extensions)}")
-        return
+        return created_stacks
     
     # Count files per format and find XMP files
     format_counts = {}
@@ -98,9 +153,9 @@ def stack_images(source_dir, target_dir=None, stack_interval=1) -> List[Path]:
     
     print("\n📊 Images found:")
     
-    # Gruppiere Dateien nach Kategorien
+    # Group files by categories
     found_categories = {}
-    for category, extensions in supported_formats.items():
+    for category, extensions in ImageFormat.extensions().items():
         category_files = []
         for ext in extensions:
             count = format_counts.get(ext.lower(), 0)
@@ -147,8 +202,10 @@ def stack_images(source_dir, target_dir=None, stack_interval=1) -> List[Path]:
     for i, file in enumerate(image_files, 1):
         capture_time = capture_times[file]
         
-        if i % 10 == 0:  # Show progress every 10 files
-            print(f"\r💾 Processing file {i}/{len(image_files)}...", end="")
+        # Show progress
+        progress = (i / len(image_files)) * 100
+        if i % max(1, len(image_files) // 20) == 0:  # Update ~20 times total
+            print(f"\r💾 Processing files: {progress:.1f}% ({i}/{len(image_files)})", end="")
 
         if last_time and (capture_time - last_time).total_seconds() > stack_interval:
             if len(stack) > 1:
@@ -177,8 +234,8 @@ def stack_images(source_dir, target_dir=None, stack_interval=1) -> List[Path]:
         stack_sizes.append(len(stack))
         stacks_created += 1
 
-    print("\r" + " " * 50 + "\r", end="")  # Clear the last progress indicator
-    print(f"✅ Done: {stacks_created} stacks created.")
+    print("\r" + " " * 80 + "\r", end="")  # Clear the last progress indicator
+    print(f"✅ Done: {stacks_created} stacks created in {target_path.resolve()}")
     # Print stack overview
     if stack_sizes:
         print("\n📂 Stack overview:")
@@ -196,121 +253,3 @@ def stack_images(source_dir, target_dir=None, stack_interval=1) -> List[Path]:
         print("  - Only single images in directory")
     
     return created_stacks
-
-def print_usage():
-    print("❗ Usage: python focus_stack_sorter.py <source_dir> [<target_dir>] [options]")
-    print("\nOptions:")
-    print("  --interval      Maximum time interval between images in seconds (optional, default: 1)")
-    print("  --stack         Process stacks with HeliconFocus after organizing")
-    print("  --stack-only    Process existing stacks with HeliconFocus without sorting")
-    print("  --resume        Process only unprocessed stacks with HeliconFocus")
-    print("  --tiff          Use TIFF format for HeliconFocus processing (default: RAW/DNG)")
-    print("  --no-ab         Skip A+B combination in HeliconFocus processing")
-    print("\nExamples:")
-    print("  python focus_stack_sorter.py ~/Pictures/OM1_RAWs")
-    print("  python focus_stack_sorter.py ~/Pictures/OM1_RAWs ~/Stacks")
-    print("  python focus_stack_sorter.py ~/Pictures/OM1_RAWs --interval 2")
-    print("  python focus_stack_sorter.py ~/Pictures/OM1_RAWs ~/Stacks --interval 0.5")
-
-if __name__ == "__main__":
-    if len(sys.argv) < 2 or sys.argv[1] in ["-h", "--help"]:
-        print_usage()
-        sys.exit(1)
-
-    source_dir = sys.argv[1]
-    target_dir = None
-    interval = 1.0  # Default: 1 second
-    use_helicon = False
-    stack_only = False
-    resume = False
-    use_tiff = False
-    combine_ab = True  # Default: create A+B combination
-
-    # Process remaining arguments
-    i = 2
-    while i < len(sys.argv):
-        if sys.argv[i] == "--interval":
-            if i + 1 >= len(sys.argv):
-                print("❌ Error: --interval requires a value in seconds")
-                sys.exit(1)
-            try:
-                interval = float(sys.argv[i + 1])
-                if interval <= 0:
-                    print("❌ Error: Interval must be greater than 0")
-                    sys.exit(1)
-                i += 2
-            except ValueError:
-                print(f"❌ Error: Invalid interval '{sys.argv[i + 1]}'")
-                sys.exit(1)
-        elif sys.argv[i] == "--stack":
-            use_helicon = True
-            i += 1
-        elif sys.argv[i] == "--tiff":
-            use_tiff = True
-            i += 1
-        elif sys.argv[i] == "--no-ab":
-            combine_ab = False
-            i += 1
-        elif sys.argv[i] == "--stack-only":
-            stack_only = True
-            use_helicon = True
-            i += 1
-        elif sys.argv[i] == "--resume":
-            resume = True
-            use_helicon = True
-            i += 1
-        else:
-            if target_dir is None:
-                target_dir = sys.argv[i]
-            else:
-                print(f"❌ Error: Unknown parameter '{sys.argv[i]}'")
-                print_usage()
-                sys.exit(1)
-            i += 1
-
-    # Create target directory if not specified
-    if not target_dir:
-        target_dir = source_dir
-    
-    # Start total time measurement
-    total_start = time.time()
-    
-    # Find existing stacks if not sorting
-    if stack_only:
-        print("\n🔍 Looking for existing stacks...")
-        stacks = []
-        for item in Path(target_dir).iterdir():
-            if item.is_dir() and item.name.startswith("Stack_"):
-                stacks.append(item)
-        print(f"Found {len(stacks)} existing stacks")
-    else:
-        # Run stacking
-        sort_start = time.time()
-        stacks = stack_images(source_dir, target_dir, interval)
-        sort_time = time.time() - sort_start
-        print(f"\n⏱️ Sorting time: {sort_time:.2f} seconds")
-    
-    # Process with HeliconFocus if requested
-    if use_helicon:
-        # Filter stacks if resuming
-        if resume:
-            unprocessed_stacks = []
-            for stack in stacks:
-                if not (stack / "stacked").exists():
-                    unprocessed_stacks.append(stack)
-            print(f"\n🔍 Found {len(unprocessed_stacks)} unprocessed stacks")
-            stacks = unprocessed_stacks
-        stack_start = time.time()
-        print("\n🎨 Processing stacks with HeliconFocus...")
-        # Create 'stacked' directory in stack directory
-        for stack_dir in stacks:
-            output_dir = stack_dir / "stacked"
-            print(f"\n📂 Output directory: {output_dir}")
-            run_helicon_focus(stack_dir, output_dir, use_tiff, combine_ab)
-        
-        stack_time = time.time() - stack_start
-        print(f"\n⏱️ Total stacking time: {stack_time:.2f} seconds")
-    
-    # Print total execution time
-    total_time = time.time() - total_start
-    print(f"\n⏱️ Total execution time: {total_time:.2f} seconds")

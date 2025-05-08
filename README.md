@@ -1,4 +1,123 @@
-# Focus Stack Organizer 📸
+# Focus Stack Organizer
+
+Ein Tool zum Organisieren und Stapeln von Fokus-Stacking-Aufnahmen mit Helicon Focus.
+
+## Features
+
+- Automatische Sortierung von Bildern in Fokus-Stacks basierend auf Aufnahmezeiten
+- Integration mit Helicon Focus für die Stapelverarbeitung
+- Unterstützung für RAW-Formate (ORF, NEF, CR2, ARW, RW2, RAF, DNG) und Standardformate (JPG, TIFF, PNG)
+- Automatische Verarbeitung von XMP-Sidecar-Dateien
+- Fortschrittsanzeige und detaillierte Statistiken
+- Flexible Konfiguration der Stapelverarbeitung
+
+## Installation
+
+1. Stellen Sie sicher, dass Python 3.6 oder höher installiert ist
+2. Installieren Sie [Helicon Focus](https://www.heliconsoft.com/heliconsoft-products/helicon-focus/)
+3. Installieren Sie exiftool für die EXIF-Datenverarbeitung
+
+```bash
+brew install exiftool  # macOS mit Homebrew
+```
+
+## Verwendung
+
+Das Tool bietet drei Hauptbefehle:
+
+### 1. Nur Sortieren
+
+```bash
+python main.py sort <quell_ordner> [optionen]
+
+Optionen:
+  --target-dir <ordner>  Zielordner für sortierte Stacks
+  --interval <sekunden>  Zeitintervall zwischen Aufnahmen (Standard: 1.0)
+```
+
+### 2. Nur Stapeln
+
+```bash
+python main.py stack <stack_ordner> [optionen]
+
+Optionen:
+  --output-dir <ordner>  Ausgabeordner für gestapelte Bilder
+  --radius <1-8>        Radius-Parameter für HeliconFocus (Standard: 3)
+  --smoothing <0-4>     Glättungsparameter für HeliconFocus (Standard: 1)
+  --jpeg-quality <1-100> JPEG-Qualität (Standard: 95)
+  --output-format <format> Ausgabeformat (jpg, tif, dng) (Standard: dng)
+  --no-ab              A+B Kombination überspringen
+```
+
+### 3. Sortieren und Stapeln
+
+```bash
+python main.py sort-and-stack <quell_ordner> [optionen]
+
+Optionen:
+  Kombiniert alle Optionen von 'sort' und 'stack'
+```
+
+## Beispiele
+
+```bash
+# Bilder sortieren mit 2-Sekunden-Intervall
+python main.py sort ~/Bilder/OM1_RAWs --interval 2
+
+# Vorhandene Stacks verarbeiten
+python main.py stack ~/Bilder/Stacks --output-format jpg --jpeg-quality 90
+
+# Sortieren und direkt stapeln
+python main.py sort-and-stack ~/Bilder/OM1_RAWs --interval 1.5 --radius 4
+```
+
+## Unterstützte Bildformate
+
+### RAW-Formate
+
+- ORF (Olympus)
+- NEF (Nikon)
+- CR2 (Canon)
+- ARW (Sony)
+- RW2 (Panasonic)
+- RAF (Fuji)
+- DNG (Adobe)
+
+### Standardformate
+
+- JPG/JPEG
+- TIFF/TIF
+- PNG
+
+## Verhalten
+
+### Sortierung
+
+- Bilder werden basierend auf ihren EXIF-Aufnahmezeiten gruppiert
+- Aufnahmen innerhalb des spezifizierten Zeitintervalls werden als ein Stack behandelt
+- Stacks werden als `Stack_XXX` Ordner organisiert (001, 002, etc.)
+- XMP-Sidecar-Dateien werden automatisch mit ihren Bildern verschoben
+
+### Stapelverarbeitung
+
+- Verarbeitet Stacks mit Helicon Focus Methoden A, B und C
+- Optional wird eine A+B Kombination erstellt
+- Überspringt bereits verarbeitete Methoden
+- Zeigt Fortschritt und Zeitstatistiken
+
+## Fehlerbehebung
+
+### Keine Stacks erstellt
+
+- Prüfen Sie, ob die Bilder EXIF-Daten enthalten
+- Stellen Sie sicher, dass das Zeitintervall groß genug ist
+- Überprüfen Sie die unterstützten Bildformate
+
+### Helicon Focus Fehler
+
+- Stellen Sie sicher, dass Helicon Focus installiert ist
+- Überprüfen Sie den Pfad zur Helicon Focus Executable
+- Prüfen Sie die Berechtigungen des Ausgabeordners 📸
 
 A Python script for automatically organizing focus-stacking image series. Perfect for macro and product photography with cameras like the Olympus OM-1 that support focus bracketing.
 
@@ -186,7 +305,6 @@ Stack_003 → 8 images
 - [x] Automatic stacking with HeliconFocus (methods A, B, C and A+B)
 - [ ] Graphical User Interface (GUI)
 - [ ] Drag & Drop functionality
-- [ ] Stack content preview
 
 ## 🤝 Contributing
 
